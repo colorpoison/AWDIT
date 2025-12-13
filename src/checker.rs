@@ -1,3 +1,4 @@
+use std::collections::{HashMap, HashSet};
 use super::*;
 
 pub struct HistoryChecker<'h, F> {
@@ -8,6 +9,14 @@ pub struct HistoryChecker<'h, F> {
 }
 
 impl<'h, F: FnMut(&ConsistencyViolation)> HistoryChecker<'h, F> {
+
+
+
+
+
+
+
+
     fn check_partial_read_consistency(&mut self) -> Result<(), ConsistencyViolation> {
         for (s_idx, session) in self.history.sessions.iter().enumerate() {
             for (t_idx, transaction) in session.iter().enumerate() {
@@ -192,7 +201,99 @@ impl<'h, F: FnMut(&ConsistencyViolation)> HistoryChecker<'h, F> {
 
         Ok(read_map)
     }
+    pub fn check_mixed(&mut self) -> bool {
+        self.any_violation = false;
+        if self.check_partial_read_consistency().is_err() {
+            return false;
+        }
+        let Ok(graph) = self.infer_graph() else {
+            return false;
+        };
+        let mut pco =PartialCommitOrder::get_so_and_wr(&graph, self.history);
+        let mut ser:HashSet<TransactionId>=HashSet::new();
+        let mut ser_added:HashSet<TransactionId>=HashSet::new();
+        let mut var:HashSet<TransactionId>=HashSet::new();
+        let mut no_var:HashSet<TransactionId>=HashSet::new();
+        for (s_idx, session) in self.history.sessions.iter().enumerate() {
+            for (t_idx, transaction) in session.iter().enumerate() {
+                let tid = TransactionId(s_idx, t_idx);
+                if transaction.isolation_level == IsolationLevel::Serializability ||
+                    transaction.isolation_level == IsolationLevel::Undefined{
+                    &ser.insert(tid);
+                }else if transaction.isolation_level.needs_var(){
+                    var.insert(tid);
+                }else{
+                    no_var.insert(tid);
+                }
 
+            }
+        }
+        //TODO also saturate var
+        pco.saturate_no_var(self.history,&graph,&no_var);
+        let mut p = &mut vec![0; self.history.sessions.len()];
+        //Makes sure the prefix starts on ser transactions
+        for sid in 0..p.len() {
+            let tid = TransactionId(sid, p[sid]);
+            if !&ser.contains(&tid){
+                Self::next_ser(&graph,&ser,p,sid);
+            }
+        }
+        self.check_mixed_rec(&graph,&pco,&ser,p,&mut ser_added)
+    }
+    fn check_mixed_rec(&mut self, graph:&WriteReadGraph,pco:&PartialCommitOrder,ser :&HashSet<TransactionId>, p:&mut Vec<usize>,ser_added :&mut HashSet<TransactionId>) -> bool{
+        let mut res = true;
+        for (sid,&tidx) in p.iter().enumerate(){
+            if tidx < graph.reads[sid].len() {
+                res = false;    //Reaching this line means not all ser transactions are added yet
+                let new_t = TransactionId(sid,tidx);
+                if !self.possible_extension(&graph,&pco,&ser_added,&ser,&new_t){
+                    continue;
+                }
+                let mut pco2= PartialCommitOrder{rev_order:pco.rev_order.clone()};
+                let mut ser_added2=ser_added.clone();
+                let mut p2 = p.clone();
+                Self::next_ser(&graph,&ser,&mut p2,tidx);
+                ser_added2.insert(new_t);
+                for t in ser{
+                    if !ser_added.contains(&t){
+                        pco2.rev_order[t.0][t.1].insert(new_t);
+                    }
+                }
+                pco2.saturate_no_var(&self.history,&graph,&ser);
+                if pco2.is_acyclic() && self.check_mixed_rec(&graph,&pco2,&ser,&mut p2,&mut ser_added2){
+                    return true;
+                }
+
+            }
+        }
+        res
+    }
+    fn possible_extension(&mut self,graph:&WriteReadGraph,pco:&PartialCommitOrder,ser_added :&HashSet<TransactionId>, ser :&HashSet<TransactionId>,new_t:&TransactionId) -> bool{
+
+        for tid in pco.get_visible(self.history, &graph, new_t,Key(0)){
+            if ser.contains(&tid) && !ser_added.contains(&tid) {
+                return false;
+            }
+        }
+        for tid_after in ser.iter(){
+            if ser_added.contains(tid_after) || *tid_after==*new_t {
+                continue;
+            }
+            for &(tid_before,kv) in graph.reads[tid_after.0][tid_after.1].iter(){
+                if ser_added.contains(&tid_before) && graph.writes_var(kv.key,new_t) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+    fn next_ser(graph:&WriteReadGraph,ser :&HashSet<TransactionId>, p:&mut Vec<usize>, i:usize){
+        p[i] += 1;
+        if p[i] < graph.reads[i].len() && !ser.contains(&TransactionId(i,p[i])) {
+            Self::next_ser(&graph,ser,p,i);
+        }
+
+    }
     pub fn check_causal(&mut self) -> bool {
         self.any_violation = false;
         if self.check_partial_read_consistency().is_err() {
@@ -223,7 +324,7 @@ impl<'h, F: FnMut(&ConsistencyViolation)> HistoryChecker<'h, F> {
         }
 
         let write_sets = history.get_write_sets();
-        let mut commit_order = PartialCommitOrder::new(&history);
+        let mut commit_order = PartialCommitOrderJust::new(&history);
         let mut hb: FxHashMap<TransactionId, VectorClock> = FxHashMap::default();
         let mut writes_per_key: FxHashMap<Key, BTreeMap<usize, Vec<usize>>> = FxHashMap::default();
 
@@ -334,7 +435,7 @@ impl<'h, F: FnMut(&ConsistencyViolation)> HistoryChecker<'h, F> {
         let history = self.history;
         let write_sets = history.get_write_sets();
 
-        let mut commit_order = PartialCommitOrder::new(&history);
+        let mut commit_order = PartialCommitOrderJust::new(&history);
         for (t3_s_idx, sess_reads) in graph.reads.iter().enumerate() {
             let mut last_writes_per_key = FxHashMap::default();
             for (t3_t_idx, t3_writers) in sess_reads.iter().enumerate() {
@@ -408,7 +509,7 @@ impl<'h, F: FnMut(&ConsistencyViolation)> HistoryChecker<'h, F> {
         let history = self.history;
         let write_sets = history.get_write_sets();
 
-        let mut commit_order = PartialCommitOrder::new(&history);
+        let mut commit_order = PartialCommitOrderJust::new(&history);
         for (t3_s_idx, session) in graph.reads.iter().enumerate() {
             for (t3_t_idx, t3_writers) in session.iter().enumerate() {
                 let mut read_txns = FxHashSet::default();
@@ -485,12 +586,133 @@ impl Display for History {
         Ok(())
     }
 }
-
 struct PartialCommitOrder {
+    rev_order: Vec<Vec<HashSet<TransactionId>>>,
+}
+impl PartialCommitOrder {
+    fn add(&mut self, partial_commit_order: PartialCommitOrder){
+        for (row_a, row_b) in self.rev_order.iter_mut().zip(partial_commit_order.rev_order.iter()) {
+            for (set_a, set_b) in row_a.iter_mut().zip(row_b.iter()) {
+                set_a.extend(set_b.iter().cloned());
+            }
+        }
+    }
+    fn add_session_order(&mut self, history: &History){
+        let init = TransactionId(history.sessions.len()-1,0);
+        for (sid,session) in history.sessions.iter().enumerate() {
+            self.rev_order[sid][0].insert(init);
+            for i in 0..session.len()-1{
+                self.rev_order[sid][i+1].insert(TransactionId(sid,i));
+            }
+        }
+    }
+
+    pub fn get_so_and_wr(graph:&WriteReadGraph,history: &History) -> PartialCommitOrder{
+        let mut res = graph.to_partial();
+        res.add_session_order(history);
+        res
+    }
+
+    fn get_visible(&self,history: &History,graph:&WriteReadGraph,tid:&TransactionId, var:Key) -> HashSet<TransactionId> {
+        match history.sessions[tid.0][tid.1].isolation_level {
+            IsolationLevel::Serializability | IsolationLevel::Undefined => {
+                let mut res=HashSet::new();
+                self.get_visible_ser(tid, & mut res);
+                res
+            }
+            IsolationLevel::Casual => Self::get_visible_c(history,graph,tid),
+            IsolationLevel::ReadAtomic => Self::get_visible_ra(graph,tid),
+            IsolationLevel::ReadCommitted => Self::get_visible_rc(history,graph,tid,var),
+        }
+    }
+    fn get_visible_ser(&self,tid:&TransactionId,res:&mut HashSet<TransactionId>){
+        for tid2 in self.rev_order[tid.0][tid.1].iter() {
+            if res.insert(*tid2) {
+                self.get_visible_ser(tid2, res);
+            }
+        }
+    }
+    fn get_visible_c(history: &History,graph:&WriteReadGraph,tid:&TransactionId) -> HashSet<TransactionId>{
+        let res:HashSet<TransactionId> = HashSet::new();
+        //TODO Implement
+        res
+    }
+    fn get_visible_ra(graph:&WriteReadGraph,tid:&TransactionId) -> HashSet<TransactionId>{
+        let mut res:HashSet<TransactionId> = HashSet::new();
+        for i in 0..tid.1{
+            res.insert(TransactionId(tid.0,i)); //All transactions earlier in the session
+        }
+        for &(to_add,_kv) in graph.reads[tid.0][tid.1].iter(){
+            res.insert(to_add);
+        }
+        res
+    }
+    fn get_visible_rc(history: &History,graph:&WriteReadGraph,tid:&TransactionId, var:Key) -> HashSet<TransactionId>{
+        let mut res:HashSet<TransactionId> = HashSet::new();
+        //TODO Implement
+        res
+    }
+    fn saturate_no_var(&mut self,history: &History, graph:&WriteReadGraph, to_sat:&HashSet<TransactionId>){
+        let mut seen:HashSet<(TransactionId,TransactionId)>=HashSet::new();
+        let mut changed = true;
+        while changed{
+            changed=false;
+            for r in to_sat.iter(){
+                for t in self.get_visible(&history,&graph, r,Key(0)).into_iter(){
+                    //We assume that the var does not matter anyway
+                    if t==*r || seen.contains(&(*r,t)){
+                        continue;
+                    }
+                    seen.insert((*r,t));
+                    for &(tid,kv) in graph.reads[r.0][r.1].iter(){
+                        if graph.writes_var(kv.key,&t){
+                            self.rev_order[tid.0][tid.1].insert(t);
+                            changed = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn is_acyclic(&self) -> bool {
+        let mut color:HashMap<TransactionId,i32> = HashMap::new(); // 0=White, 1=Gray, 2=Black
+        let mut visited:HashSet<TransactionId> = HashSet::new();
+        fn dfs(partial_commit_order: &PartialCommitOrder, tid: TransactionId , color: &mut HashMap<TransactionId,i32>) -> bool {
+            color.insert(tid,1);
+            for node in partial_commit_order.rev_order[tid.0][tid.1].clone(){
+                if color.get(&node) == Some(&1) {
+                    return false;
+                }
+                if color.get(&node) == None {
+                    if !dfs(partial_commit_order, node, color) {
+                        return false;
+                    }
+                }
+            }
+
+            color.insert(tid,2);
+            true
+        }
+
+        for (s_idx, session) in self.rev_order.iter().enumerate() {
+            for (t_idx, transaction) in session.iter().enumerate() {
+                let tid = TransactionId(s_idx, t_idx);
+                if color.get(&tid) == None {
+                    if !dfs(self,tid, &mut color) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+}
+struct PartialCommitOrderJust {
     rev_order: Vec<Vec<Vec<(TransactionId, CoJustification)>>>,
 }
 
-impl PartialCommitOrder {
+impl PartialCommitOrderJust {
     fn new(shape: &History) -> Self {
         Self {
             rev_order: shape
@@ -749,6 +971,33 @@ struct WriteReadGraph {
 }
 
 impl WriteReadGraph {
+    // pointlessly inefficient but I would have to change too much about the existing code to fix
+    fn writes_var(&self,var:Key,transaction: &TransactionId) -> bool{
+        for &(_tid,kv) in self.reads[transaction.0][transaction.1].iter() {
+            if kv.key == var{
+                return true;
+            }
+        }
+        false
+    }
+    fn to_partial(&self) -> PartialCommitOrder{
+        PartialCommitOrder {
+            rev_order: self.reads
+                .iter()
+                .map(|level2| {
+                    level2
+                        .iter()
+                        .map(|level3| {
+                            level3
+                                .iter()
+                                .map(|(id, _kv)| *id)   // copy out the TransactionId
+                                .collect()
+                        })
+                        .collect()
+                })
+                .collect()
+        }
+    }
     fn dfs(&self, mut post_action: impl FnMut(TransactionId)) -> Result<(), ViolatingCycle> {
         let mut search_state: Vec<_> = self
             .reads

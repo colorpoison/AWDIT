@@ -21,6 +21,7 @@ pub mod formats;
 pub mod partial_order;
 pub mod util;
 pub mod vector_clock;
+use std::str::FromStr;
 
 /// Represents a database history. Initial reads are handled explicitly, meaning
 /// there should be a transaction writing 0 to all keys, if so desired.
@@ -174,11 +175,12 @@ impl Display for HistoryStats {
 #[derive(Clone, Debug)]
 pub struct Transaction {
     pub events: Vec<Event>,
+    pub isolation_level: IsolationLevel,
 }
 
 impl Transaction {
-    pub fn new() -> Self {
-        Self { events: Vec::new() }
+    pub fn new(isolation_level: IsolationLevel) -> Self {
+        Self { events: Vec::new(), isolation_level }
     }
 
     pub fn last(&self) -> Option<&Event> {
@@ -217,7 +219,51 @@ pub enum Event {
     Read(KeyValuePair),
     Write(KeyValuePair),
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IsolationLevel {
+    ReadCommitted,
+    ReadAtomic,
+    Casual,
+    Serializability,
+    Undefined,
 
+}
+
+impl IsolationLevel {
+    pub fn abbreviation(&self) -> &'static str {
+        match self {
+            IsolationLevel::ReadCommitted   => "RC",
+            IsolationLevel::ReadAtomic      => "RA",
+            IsolationLevel::Casual          => "C",
+            IsolationLevel::Serializability => "SER",
+            IsolationLevel::Undefined => "UNDEF"
+        }
+    }
+    pub fn needs_var(&self) -> bool {
+        *self == IsolationLevel::ReadCommitted
+    }
+}
+
+impl fmt::Display for IsolationLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.abbreviation())
+    }
+}
+
+impl FromStr for IsolationLevel {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_ascii_uppercase().as_str() {
+            "RC" | "READCOMMITTED"  => Ok(IsolationLevel::ReadCommitted),
+            "RA" | "READATOMIC"  => Ok(IsolationLevel::ReadAtomic),
+            "C"  | "CASUAL" => Ok(IsolationLevel::Casual),
+            "SER" | "SERIALIZABILITY" => Ok(IsolationLevel::Serializability),
+            "UNDEF" | "UNDEFINED" => Ok(IsolationLevel::Undefined),
+            _ => Err("invalid isolation level abbreviation"),
+        }
+    }
+}
 impl Event {
     pub fn key(self) -> Key {
         match self {

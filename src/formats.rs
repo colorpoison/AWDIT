@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::{fs, io};
-
+use clap::builder::TypedValueParser;
 #[cfg(feature = "dbcop")]
 use dbcop::db::history::Event as DbCopEvent;
 #[cfg(feature = "dbcop")]
@@ -13,8 +13,8 @@ use dbcop::db::history::Transaction as DbCopTransaction;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{Event, Key, KeyValuePair, Transaction, Value};
-
+use crate::{Event, IsolationLevel, Key, KeyValuePair, Transaction, Value};
+use crate::IsolationLevel::Undefined;
 use super::History;
 
 impl History {
@@ -56,7 +56,11 @@ impl History {
                 .next()
                 .and_then(|k| k.parse::<i64>().ok())
                 .ok_or(ParseHistoryError::InvalidPlumeFormat)?;
-
+            let isolation_level = parts.next();
+            let mut level = Undefined;
+            if let Some(level_str)=isolation_level{
+                level=level_str.parse::<IsolationLevel>().ok().ok_or(ParseHistoryError::InvalidPlumeFormat)?;
+            }
             keys.insert(Key(key));
             let kv = KeyValuePair {
                 key: Key(key),
@@ -81,14 +85,14 @@ impl History {
                 history.sessions.len() - 1
             });
             let t_idx = *transaction_map.entry(txn).or_insert_with(|| {
-                history.sessions[s_idx].push(Transaction::new());
+                history.sessions[s_idx].push(Transaction::new(level));
                 history.sessions[s_idx].len() - 1
             });
             history.sessions[s_idx][t_idx].events.push(event);
         }
 
         // TODO: maybe handle this implicitly?
-        let mut init_transaction = Transaction::new();
+        let mut init_transaction = Transaction::new(Undefined);
         for key in keys {
             init_transaction.push(Event::Write(KeyValuePair {
                 key,
@@ -144,7 +148,7 @@ impl History {
                         reader.read_exact(&mut txn_id)?;
                         let txn_id = i64::from_be_bytes(txn_id);
 
-                        cur_txn = Some(Transaction::new());
+                        cur_txn = Some(Transaction::new(Undefined));
                         cur_txn_id = Some(txn_id);
                     }
                     b'C' => {
@@ -227,7 +231,7 @@ impl History {
         }
 
         // TODO: maybe handle this implicitly?
-        let mut init_transaction = Transaction::new();
+        let mut init_transaction = Transaction::new(Undefined);
         for &key in &keys {
             init_transaction.push(Event::Write(KeyValuePair {
                 key,
@@ -416,7 +420,7 @@ impl History {
                     };
                     events.push(event);
                 }
-                transactions.push(crate::Transaction { events });
+                transactions.push(crate::Transaction { events, isolation_level:Undefined });
             }
             sessions.push(transactions);
         }
@@ -439,13 +443,17 @@ impl Display for PlumeHistoryDisplay<'_> {
         let mut t_idx = 0;
         for (s_idx, session) in self.history.sessions.iter().enumerate() {
             for txn in session {
+                let mut level_str :String = "".to_string();
+                if txn.isolation_level != Undefined {
+                    level_str = format!(",{}", txn.isolation_level.abbreviation());
+                }
                 for event in &txn.events {
                     match event {
                         Event::Read(kv) => {
-                            writeln!(f, "r({},{},{},{})", kv.key, kv.value, s_idx, t_idx)?
+                            writeln!(f, "r({},{},{},{},{})", kv.key, kv.value, s_idx, t_idx, level_str)?
                         }
                         Event::Write(kv) => {
-                            writeln!(f, "w({},{},{},{})", kv.key, kv.value, s_idx, t_idx)?
+                            writeln!(f, "w({},{},{},{},{})", kv.key, kv.value, s_idx, t_idx, level_str)?
                         }
                     }
                 }

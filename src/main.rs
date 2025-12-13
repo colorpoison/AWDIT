@@ -11,6 +11,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use rand::prelude::*;
 use rand_distr::{Bernoulli, Pareto, Uniform};
 use rustc_hash::{FxHashMap, FxHashSet};
+use awdit::IsolationLevel::Undefined;
 
 #[derive(Parser)]
 struct App {
@@ -137,8 +138,8 @@ impl PartialHistory {
         if num_sessions == 0 {
             panic!("Number of sessions must be at least 1");
         }
-        // The last session is contains initial values for all keys
-        let mut sessions = vec![vec![Transaction::new()]; num_sessions + 1];
+        // The last session contains initial values for all keys
+        let mut sessions = vec![vec![Transaction::new(Undefined)]; num_sessions + 1];
 
         // Generate initial transaction
         sessions[num_sessions][0]
@@ -192,7 +193,7 @@ impl PartialHistory {
             if should_commit {
                 commit_order.push(tid);
                 rev_commit_order.insert(tid, commit_order.len() - 1);
-                sessions[session].push(Transaction::new());
+                sessions[session].push(Transaction::new(Undefined));
                 tid = TransactionId(tid.0, tid.1 + 1);
             }
 
@@ -213,7 +214,7 @@ impl PartialHistory {
             if should_commit {
                 commit_order.push(tid);
                 rev_commit_order.insert(tid, commit_order.len() - 1);
-                sessions[session].push(Transaction::new());
+                sessions[session].push(Transaction::new(Undefined));
             }
         }
 
