@@ -280,7 +280,7 @@ impl<'h, F: FnMut(&ConsistencyViolation)> HistoryChecker<'h, F> {
                 continue;
             }
             for &(tid_before,kv) in graph.reads[tid_after.0][tid_after.1].iter(){
-                if ser_added.contains(&tid_before) && graph.writes_var(kv.key,new_t) {
+                if ser_added.contains(&tid_before) && self.history.writes_var(kv.key,new_t) {
                     return false;
                 }
             }
@@ -667,7 +667,7 @@ impl PartialCommitOrder {
                     }
                     seen.insert((*r,t));
                     for &(tid,kv) in graph.reads[r.0][r.1].iter(){
-                        if graph.writes_var(kv.key,&t){
+                        if tid != t && history.writes_var(kv.key,&t){
                             self.rev_order[tid.0][tid.1].insert(t);
                             changed = true;
                         }
@@ -973,7 +973,7 @@ struct WriteReadGraph {
 
 impl WriteReadGraph {
     // pointlessly inefficient but I would have to change too much about the existing code to fix
-    fn writes_var(&self,var:Key,transaction: &TransactionId) -> bool{
+    fn reads_var(&self,var:Key,transaction: &TransactionId) -> bool{
         for &(_tid,kv) in self.reads[transaction.0][transaction.1].iter() {
             if kv.key == var{
                 return true;

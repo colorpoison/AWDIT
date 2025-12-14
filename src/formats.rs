@@ -13,11 +13,20 @@ use dbcop::db::history::Transaction as DbCopTransaction;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{Event, IsolationLevel, Key, KeyValuePair, Transaction, Value};
+use crate::{Event, IsolationLevel, Key, KeyValuePair, Transaction, TransactionId, Value};
 use crate::IsolationLevel::Undefined;
 use super::History;
 
 impl History {
+    // pointlessly inefficient but I would have to change too much about the existing code to fix
+    pub fn writes_var(&self,var:Key,transaction: &TransactionId) -> bool{
+        for event in self.sessions[transaction.0][transaction.1].events.iter() {
+            if event.is_write() && event.key() == var{
+                return true;
+            }
+        }
+        false
+    }
     pub fn parse_plume_history(path: impl AsRef<Path>) -> Result<Self, ParseHistoryError> {
         if !path.as_ref().metadata()?.is_file() {
             return Err(ParseHistoryError::NotAFile(path.as_ref().to_path_buf()));
