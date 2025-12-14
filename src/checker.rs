@@ -616,13 +616,16 @@ impl PartialCommitOrder {
     }
 
     fn get_visible(&self,history: &History,graph:&WriteReadGraph,tid:&TransactionId, var:Key) -> HashSet<TransactionId> {
+        let mut res=HashSet::new();
         match history.sessions[tid.0][tid.1].isolation_level {
             IsolationLevel::Serializability | IsolationLevel::Undefined => {
-                let mut res=HashSet::new();
                 self.get_visible_ser(tid, & mut res);
                 res
             }
-            IsolationLevel::Casual => Self::get_visible_c(history,graph,tid),
+            IsolationLevel::Casual => {
+                Self::get_visible_c(history, graph, tid, & mut res);
+                res
+            }
             IsolationLevel::ReadAtomic => Self::get_visible_ra(graph,tid),
             IsolationLevel::ReadCommitted => Self::get_visible_rc(history,graph,tid,var),
         }
@@ -634,10 +637,19 @@ impl PartialCommitOrder {
             }
         }
     }
-    fn get_visible_c(history: &History,graph:&WriteReadGraph,tid:&TransactionId) -> HashSet<TransactionId>{
-        let res:HashSet<TransactionId> = HashSet::new();
-        //TODO Implement
-        res
+    fn get_visible_c(history: &History,graph:&WriteReadGraph,tid:&TransactionId, res: &mut HashSet<TransactionId>) {
+        if tid.1 > 0{
+            let tid2 = TransactionId(tid.0,tid.1-1);
+            if res.insert(tid2) {
+                Self::get_visible_c(history, graph, &tid2, res);
+            }
+        }
+        for &(tid2,_kv) in graph.reads[tid.0][tid.1].iter() {
+            res.insert(tid2);
+            if res.insert(tid2) {
+                Self::get_visible_c(history, graph, &tid2, res);
+            }
+        }
     }
     fn get_visible_ra(graph:&WriteReadGraph,tid:&TransactionId) -> HashSet<TransactionId>{
         let mut res:HashSet<TransactionId> = HashSet::new();
