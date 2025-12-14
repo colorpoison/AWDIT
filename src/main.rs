@@ -108,6 +108,7 @@ enum IsolationLevel {
     ReadCommitted,
     ReadAtomic,
     Causal,
+    Mixed,
 }
 
 #[derive(Clone, ValueEnum, strum::EnumString, strum::Display, PartialEq, Eq)]
@@ -547,6 +548,9 @@ impl PartialHistory {
 }
 
 fn main() -> anyhow::Result<()> {
+
+
+
     let app = App::parse();
     match app.command {
         Command::Generate(args) => {
@@ -556,6 +560,7 @@ fn main() -> anyhow::Result<()> {
                 IsolationLevel::ReadCommitted => history.into_read_committed_history(),
                 IsolationLevel::ReadAtomic => history.into_read_atomic_history(),
                 IsolationLevel::Causal => history.into_causal_history(),
+                IsolationLevel::Mixed => panic!("Cannot generate mixed history"),
             };
 
             match args.format {
@@ -622,6 +627,7 @@ fn main() -> anyhow::Result<()> {
                         IsolationLevel::ReadCommitted => checker.check_read_committed(),
                         IsolationLevel::ReadAtomic => checker.check_read_atomic(),
                         IsolationLevel::Causal => checker.check_causal(),
+                        IsolationLevel::Mixed => checker.check_mixed(),
                     })
                     .unwrap()
                     .join()

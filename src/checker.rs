@@ -219,7 +219,7 @@ impl<'h, F: FnMut(&ConsistencyViolation)> HistoryChecker<'h, F> {
                 let tid = TransactionId(s_idx, t_idx);
                 if transaction.isolation_level == IsolationLevel::Serializability ||
                     transaction.isolation_level == IsolationLevel::Undefined{
-                    &ser.insert(tid);
+                    let _ = &ser.insert(tid);
                 }else if transaction.isolation_level.needs_var(){
                     var.insert(tid);
                 }else{
@@ -230,7 +230,7 @@ impl<'h, F: FnMut(&ConsistencyViolation)> HistoryChecker<'h, F> {
         }
         //TODO also saturate var
         pco.saturate_no_var(self.history,&graph,&no_var);
-        let mut p = &mut vec![0; self.history.sessions.len()];
+        let p = &mut vec![0; self.history.sessions.len()];
         //Makes sure the prefix starts on ser transactions
         for sid in 0..p.len() {
             let tid = TransactionId(sid, p[sid]);
@@ -676,11 +676,10 @@ impl PartialCommitOrder {
     }
 
     fn is_acyclic(&self) -> bool {
-        let mut color:HashMap<TransactionId,i32> = HashMap::new(); // 0=White, 1=Gray, 2=Black
-        let mut visited:HashSet<TransactionId> = HashSet::new();
-        fn dfs(partial_commit_order: &PartialCommitOrder, tid: TransactionId , color: &mut HashMap<TransactionId,i32>) -> bool {
-            color.insert(tid,1);
-            for node in partial_commit_order.rev_order[tid.0][tid.1].clone(){
+        let mut color:HashMap<TransactionId,i32> = HashMap::new(); // None=Unexplored, 1=Found, 2=Fully Explored
+        fn dfs(partial_commit_order: &PartialCommitOrder, tid: &TransactionId , color: &mut HashMap<TransactionId,i32>) -> bool {
+            color.insert(*tid, 1);
+            for node in partial_commit_order.rev_order[tid.0][tid.1].iter(){
                 if color.get(&node) == Some(&1) {
                     return false;
                 }
@@ -691,15 +690,15 @@ impl PartialCommitOrder {
                 }
             }
 
-            color.insert(tid,2);
+            color.insert(*tid,2);
             true
         }
 
         for (s_idx, session) in self.rev_order.iter().enumerate() {
-            for (t_idx, transaction) in session.iter().enumerate() {
+            for (t_idx, _transaction) in session.iter().enumerate() {
                 let tid = TransactionId(s_idx, t_idx);
                 if color.get(&tid) == None {
-                    if !dfs(self,tid, &mut color) {
+                    if !dfs(self,&tid, &mut color) {
                         return false;
                     }
                 }
