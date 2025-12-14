@@ -241,7 +241,7 @@ impl<'h, F: FnMut(&ConsistencyViolation)> HistoryChecker<'h, F> {
         self.check_mixed_rec(&graph,&pco,&ser,p,&mut ser_added)
     }
     fn check_mixed_rec(&mut self, graph:&WriteReadGraph,pco:&PartialCommitOrder,ser :&HashSet<TransactionId>, p:&mut Vec<usize>,ser_added :&mut HashSet<TransactionId>) -> bool{
-        let mut res = true;
+         let mut res = true;
         for (sid,&tidx) in p.iter().enumerate(){
             if tidx < graph.reads[sid].len() {
                 res = false;    //Reaching this line means not all ser transactions are added yet
@@ -252,10 +252,10 @@ impl<'h, F: FnMut(&ConsistencyViolation)> HistoryChecker<'h, F> {
                 let mut pco2= PartialCommitOrder{rev_order:pco.rev_order.clone()};
                 let mut ser_added2=ser_added.clone();
                 let mut p2 = p.clone();
-                Self::next_ser(&graph,&ser,&mut p2,tidx);
+                Self::next_ser(&graph,&ser,&mut p2,sid);
                 ser_added2.insert(new_t);
                 for t in ser{
-                    if !ser_added.contains(&t){
+                    if !ser_added2.contains(&t){
                         pco2.rev_order[t.0][t.1].insert(new_t);
                     }
                 }
@@ -600,7 +600,9 @@ impl PartialCommitOrder {
     fn add_session_order(&mut self, history: &History){
         let init = TransactionId(history.sessions.len()-1,0);
         for (sid,session) in history.sessions.iter().enumerate() {
-            self.rev_order[sid][0].insert(init);
+            if sid != history.sessions.len() - 1 { // Init should not be behind init
+                self.rev_order[sid][0].insert(init);
+            }
             for i in 0..session.len()-1{
                 self.rev_order[sid][i+1].insert(TransactionId(sid,i));
             }

@@ -43,7 +43,7 @@ To check a history for consistency, use the `check` command:
 target/release/awdit check -i <ISOLATION_LEVEL> path/to/history
 ```
 
-The three possible values for `ISOLATION_LEVEL` are `read-committed`, `read-atomic`, and `causal`.
+The four possible values for `ISOLATION_LEVEL` are `read-committed`, `read-atomic`, `causal` and `mixed`.
 By default, the history will be assumed to be in the `plume` format (see the [formats](#formats) section for more information).
 
 ### Generating histories

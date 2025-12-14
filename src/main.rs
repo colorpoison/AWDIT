@@ -25,7 +25,7 @@ enum Command {
     Generate(GenerateArgs),
     /// Check a history for consistency violations.
     Check {
-        #[clap(short, long, default_value_t = IsolationLevel::Causal)]
+        #[clap(short, long, default_value_t = IsolationLevel::Mixed)]
         isolation: IsolationLevel,
         #[arg(required = true)]
         path: PathBuf,
