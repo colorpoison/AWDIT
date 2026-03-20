@@ -97,7 +97,7 @@ impl<'h, F: FnMut(&ConsistencyViolation)> HistoryChecker<'h, F> {
                 for (key, value) in txn_writes {
                     let kv = KeyValuePair { key, value };
                     if value_map.insert(kv, tid).is_some() {
-                        eprintln!("Duplicate writes to {kv}. Using the last one..");
+                        //eprintln!("Duplicate writes to {kv}. Using the last one..");
                     }
                 }
             }

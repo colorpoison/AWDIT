@@ -1,6 +1,6 @@
 /target
 # results
-histories/bench
+histories
 dbcop-out
 output.log
 # VM files

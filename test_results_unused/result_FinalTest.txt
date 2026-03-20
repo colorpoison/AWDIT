@@ -1,0 +1,8 @@
+generated10,2: .005380144 seconds
+generated1,2: .005010951 seconds
+generated14,2: .005494719 seconds
+generated18,2: .004948583 seconds
+generated2,2: .002709574 seconds
+generated4,2: .003514377 seconds
+generated5,2: .002637949 seconds
+generated7,2: .002621849 seconds
